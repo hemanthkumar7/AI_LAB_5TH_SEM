@@ -85,11 +85,10 @@ def possible_moves(state):
         d.append('Right')
     if b[1] > 0:
         d.append('Left')
-       pos_moves = []
+    pos_moves = []
     for i in d:
         move = gen(state, i, b)
         pos_moves.append((i ,move))
-    
     return pos_moves
 
 
