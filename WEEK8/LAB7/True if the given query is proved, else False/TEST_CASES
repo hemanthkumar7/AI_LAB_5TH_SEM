@@ -1,0 +1,29 @@
+#Test1
+TELL(['implies', 'p', 'q'])
+TELL(['implies', 'r', 's'])
+ASK(['implies',['or','p','r'], ['or', 'q', 's']])
+
+
+#Test2
+TELL('p')
+TELL(['implies',['and','p','q'],'r'])
+TELL(['implies',['or','s','t'],'q'])
+TELL('t')
+ASK('r')
+
+
+#Test3
+TELL('a')
+TELL('b')
+TELL('c')
+TELL('d')
+ASK(['or', 'a', 'b', 'c', 'd'])
+
+
+#Test4
+TELL('a')
+TELL('b')
+TELL(['or', ['not', 'a'], 'b'])
+TELL(['or', 'c', 'd'])
+TELL('d')
+ASK('c')
