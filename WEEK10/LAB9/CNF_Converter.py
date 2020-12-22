@@ -1,302 +1,99 @@
+def getAttributes(string):
+    expr = '\([^)]+\)'
+    matches = re.findall(expr, string)
+    return [m for m in str(matches) if m.isalpha()]
+
+def getPredicates(string):
+    expr = '[a-z~]+\([A-Za-z,]+\)'
+    return re.findall(expr, string)
+
+def DeMorgan(sentence):
+    string = ''.join(list(sentence).copy())
+    string = string.replace('~~','')
+    flag = '[' in string
+    string = string.replace('~[','')
+    string = string.strip(']')
+    for predicate in getPredicates(string):
+        string = string.replace(predicate, f'~{predicate}')
+    s = list(string)
+    for i, c in enumerate(string):
+        if c == '|':
+            s[i] = '&'
+        elif c == '&':
+            s[i] = '|'
+    string = ''.join(s)    
+    string = string.replace('~~','')
+    return f'[{string}]' if flag else string
+
+def Skolemization(sentence):
+    SKOLEM_CONSTANTS = [f'{chr(c)}' for c in range(ord('A'), ord('Z')+1)]
+    statement = ''.join(list(sentence).copy())
+    matches = re.findall('[∀∃].', statement)
+    for match in matches[::-1]:
+        statement = statement.replace(match, '')
+        statements = re.findall('\[\[[^]]+\]]', statement)
+        for s in statements:
+            statement = statement.replace(s, s[1:-1])
+        for predicate in getPredicates(statement):
+            attributes = getAttributes(predicate)
+            if ''.join(attributes).islower():
+                statement = statement.replace(match[1],SKOLEM_CONSTANTS.pop(0))
+            else:
+                aU = [a for a in attributes if not a.islower()][0]
+                statement = statement.replace(aU, f'{SKOLEM_CONSTANTS.pop(0)}({match[1]})')
+    return statement
+
 import re
 
-
-def remove_brackets(source, id):
-    reg = '\(([^\(]*?)\)'
-    m = re.search(reg, source)
-    if m is None:
-        return None, None
-    new_source = re.sub(reg, str(id), source, count=1)
-    return new_source, m.group(1)
-
-
-class logic_base:
-    def __init__(self, input):
-        self.my_stack = []
-        self.source = input
-        final = input
-        while 1:
-            input, tmp = remove_brackets(input, len(self.my_stack))
-            if input is None:
-                break
-            final = input
-            self.my_stack.append(tmp)
-        self.my_stack.append(final)
-
-    def get_result(self):
-        root = self.my_stack[-1]
-        m = re.match('\s*([0-9]+)\s*$', root)
-        if m is not None:
-            root = self.my_stack[int(m.group(1))]
-        reg = '(\d+)'
-        while 1:
-            m = re.search(reg, root)
-            if m is None:
-                break
-            new = '(' + self.my_stack[int(m.group(1))] + ')'
-            root = re.sub(reg, new, root, count=1)
-        return root
-
-    def merge_items(self, logic):
-        reg0 = '(\d+)'
-        reg1 = '~\s+(\d+)'
-        flag = False
-        for i in range(len(self.my_stack)):
-            target = self.my_stack[i]
-            if logic not in target:
-                continue
-            m = re.search(reg1, target)
-            if m is not None:
-                continue
-            m = re.search(reg0, target)
-            if m is None:
-                continue
-            for j in re.findall(reg0, target):
-                child = self.my_stack[int(j)]
-                if logic not in child:
-                    continue
-                new_reg = "(^|\s)" + j + "(\s|$)"
-                self.my_stack[i] = re.sub(new_reg, ' ' + child + ' ', self.my_stack[i], count=1)
-                self.my_stack[i] = self.my_stack[i].strip()
-                flag = True
-        if flag:
-            self.merge_items(logic)
-
-
-class ordering(logic_base):
-    def run(self):
-        flag = False
-        for i in range(len(self.my_stack)):
-            new_source = self.add_brackets(self.my_stack[i])
-            if self.my_stack[i] != new_source:
-                self.my_stack[i] = new_source
-                flag = True
-        return flag
-
-    def add_brackets(self, source):
-        reg = "\s+(^|v|=>|<=>)\s+"
-        if len(re.findall(reg, source)) < 2:
-            return source
-        reg_and = "(~\s+)?\S+\s+^\s+(~\s+)?\S+"
-        m = re.search(reg_and, source)
-        if m is not None:
-            return re.sub(reg_and, "(" + m.group(0) + ")", source, count=1)
-        reg_or = "(~\s+)?\S+\s+v\s+(~\s+)?\S+"
-        m = re.search(reg_or, source)
-        if m is not None:
-            return re.sub(reg_or, "(" + m.group(0) + ")", source, count=1)
-        reg_imp = "(~\s+)?\S+\s+=>\s+(~\s+)?\S+"
-        m = re.search(reg_imp, source)
-        if m is not None:
-            return re.sub(reg_imp, "(" + m.group(0) + ")", source, count=1)
-        reg_iff = "(~\s+)?\S+\s+<=>\s+(~\s+)?\S+"
-        m = re.search(reg_iff, source)
-        if m is not None:
-            return re.sub(reg_iff, "(" + m.group(0) + ")", source, count=1)
-
-
-class replace_iff(logic_base):
-    def run(self):
-        final = len(self.my_stack) - 1
-        flag = self.replace_all_iff()
-        self.my_stack.append(self.my_stack[final])
-        return flag
-
-    def replace_all_iff(self):
-        flag = False
-        for i in range(len(self.my_stack)):
-            ans = self.replace_iff_inner(self.my_stack[i], len(self.my_stack))
-            if ans is None:
-                continue
-            self.my_stack[i] = ans[0]
-            self.my_stack.append(ans[1])
-            self.my_stack.append(ans[2])
-            flag = True
-        return flag
-
-    def replace_iff_inner(self, source, id):
-        reg = '^(.*?)\s+<=>\s+(.*?)$'
-        m = re.search(reg, source)
-        if m is None:
-            return None
-        a, b = m.group(1), m.group(2)
-        return (str(id) + ' ^ ' + str(id + 1), a + ' => ' + b, b + ' => ' + a)
-
-
-class replace_imp(logic_base):
-    def run(self):
-        flag = False
-        for i in range(len(self.my_stack)):
-            ans = self.replace_imp_inner(self.my_stack[i])
-            if ans is None:
-                continue
-            self.my_stack[i] = ans
-            flag = True
-        return flag
-
-    def replace_imp_inner(self, source):
-        reg = '^(.*?)\s+=>\s+(.*?)$'
-        m = re.search(reg, source)
-        if m is None:
-            return None
-        a, b = m.group(1), m.group(2)
-        if '~ ' in a:
-            return a.replace('~ ', '') + ' v ' + b
-        return '~ ' + a + ' v ' + b
-
-
-class de_morgan(logic_base):
-    def run(self):
-        reg = '~\s+(\d+)'
-        flag = False
-        final = len(self.my_stack) - 1
-        for i in range(len(self.my_stack)):
-            target = self.my_stack[i]
-            m = re.search(reg, target)
-            if m is None:
-                continue
-            flag = True
-            child = self.my_stack[int(m.group(1))]
-            self.my_stack[i] = re.sub(reg, str(len(self.my_stack)), target, count=1)
-            self.my_stack.append(self.doing_de_morgan(child))
-            break
-        self.my_stack.append(self.my_stack[final])
-        return flag
-
-    def doing_de_morgan(self, source):
-        items = re.split('\s+', source)
-        new_items = []
-        for item in items:
-            if item == 'v':
-                new_items.append('^')
-            elif item == '^':
-                new_items.append('v')
-            elif item == '~':
-                new_items.append('~')
-            elif len(item.strip()) > 0:
-                new_items.append('~')
-                new_items.append(item)
-        for i in range(len(new_items) - 1):
-            if new_items[i] == '~':
-                if new_items[i + 1] == '~':
-                    new_items[i] = ''
-                    new_items[i + 1] = ''
-        return ' '.join([i for i in new_items if len(i) > 0])
-
-
-class distributive(logic_base):
-    def run(self):
-        flag = False
-        reg = '(\d+)'
-        final = len(self.my_stack) - 1
-        for i in range(len(self.my_stack)):
-            target = self.my_stack[i]
-            if 'v' not in self.my_stack[i]:
-                continue
-            m = re.search(reg, target)
-            if m is None:
-                continue
-            for j in re.findall(reg, target):
-                child = self.my_stack[int(j)]
-                if '^' not in child:
-                    continue
-                new_reg = "(^|\s)" + j + "(\s|$)"
-                items = re.split('\s+^\s+', child)
-                tmp_list = [str(j) for j in range(len(self.my_stack), len(self.my_stack) + len(items))]
-                for item in items:
-                    self.my_stack.append(re.sub(new_reg, ' ' + item + ' ', target).strip())
-                self.my_stack[i] = ' ^ '.join(tmp_list)
-                flag = True
-            if flag:
-                break
-        self.my_stack.append(self.my_stack[final])
-        return flag
-
-
-class simplification(logic_base):
-    def run(self):
-        old = self.get_result()
-        for i in range(len(self.my_stack)):
-            self.my_stack[i] = self.reducing_or(self.my_stack[i])
-        # self.my_stack[i] = self.reducing_and(self.my_stack[i])
-        final = self.my_stack[-1]
-        self.my_stack[-1] = self.reducing_and(final)
-        return len(old) != len(self.get_result())
-
-    def reducing_and(self, target):
-        if '^' not in target:
-            return target
-        items = set(re.split('\s+^\s+', target))
-        for item in list(items):
-            if ('~ ' + item) in items:
-                return ''
-            if re.match('\d+$', item) is None:
-                continue
-            value = self.my_stack[int(item)]
-            if self.my_stack.count(value) > 1:
-                value = ''
-                self.my_stack[int(item)] = ''
-            if value == '':
-                items.remove(item)
-        return ' ^ '.join(list(items))
-
-    def reducing_or(self, target):
-        if 'v' not in target:
-            return target
-        items = set(re.split('\s+v\s+', target))
-        for item in list(items):
-            if ('~ ' + item) in items:
-                return ''
-        return ' v '.join(list(items))
-
-
-def merging(source):
-    old = source.get_result()
-    source.merge_items('v')
-    source.merge_items('^')
-    return old != source.get_result()
-
-
-def run(input):
-    all_strings = []
-    # all_strings.append(input)
-    zero = ordering(input)
-    while zero.run():
-        zero = ordering(zero.get_result())
-    merging(zero)
-
-    one = replace_iff(zero.get_result())
-    one.run()
-    all_strings.append(one.get_result())
-    merging(one)
-
-    two = replace_imp(one.get_result())
-    two.run()
-    all_strings.append(two.get_result())
-    merging(two)
-
-    three, four = None, None
-    old = two.get_result()
-    three = de_morgan(old)
-    while three.run():
-        pass
-    all_strings.append(three.get_result())
-    merging(three)
-    three_helf = simplification(three.get_result())
-    three_helf.run()
-
-    four = distributive(three_helf.get_result())
-    while four.run():
-        pass
-    merging(four)
-    five = simplification(four.get_result())
-    five.run()
-    all_strings.append(five.get_result())
-    return all_strings
-
-
-inputs = input().split('\n')
-for input in inputs:
-    for item in run(input):
-        print(item)
+def fol_to_cnf(fol):
     
+    statement = fol.replace("<=>", "_")
+    while '_' in statement:
+        i = statement.index('_')
+        new_statement = '[' + statement[:i] + '=>' + statement[i+1:] + ']&['+ statement[i+1:] + '=>' + statement[:i] + ']'
+        statement = new_statement
+    statement = statement.replace("=>", "-")
+    expr = '\[([^]]+)\]'
+    statements = re.findall(expr, statement)
+    for i, s in enumerate(statements):
+        if '[' in s and ']' not in s:
+            statements[i] += ']'
+    for s in statements:
+        statement = statement.replace(s, fol_to_cnf(s))
+    while '-' in statement:
+        i = statement.index('-')
+        br = statement.index('[') if '[' in statement else 0
+        new_statement = '~' + statement[br:i] + '|' + statement[i+1:]
+        statement = statement[:br] + new_statement if br > 0 else new_statement
+    while '~∀' in statement:
+        i = statement.index('~∀')
+        statement = list(statement)
+        statement[i], statement[i+1], statement[i+2] = '∃', statement[i+2], '~'
+        statement = ''.join(statement)
+    while '~∃' in statement:
+        i = statement.index('~∃')
+        s = list(statement)
+        s[i], s[i+1], s[i+2] = '∀', s[i+2], '~'
+        statement = ''.join(s)
+    statement = statement.replace('~[∀','[~∀')
+    statement = statement.replace('~[∃','[~∃')
+    expr = '(~[∀|∃].)'
+    statements = re.findall(expr, statement)
+    for s in statements:
+        statement = statement.replace(s, fol_to_cnf(s))
+    expr = '~\[[^]]+\]'
+    statements = re.findall(expr, statement)
+    for s in statements:
+        statement = statement.replace(s, DeMorgan(s))
+    return statement
+
+
+def start():
+    print("Enter the queries")
+    qs = input().split("next")
+    print("\n")
+    for q in qs:
+        print(Skolemization(fol_to_cnf(q)))
+        print("\n")
+
+start()
